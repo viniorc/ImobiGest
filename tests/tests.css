@@ -1,0 +1,10 @@
+@layer components {
+  .test-page { max-width: 920px; margin: 0 auto; padding: 32px 20px; display: grid; gap: 20px; }
+  .test-page h1 { margin-top: 12px; }
+  .test-page p, .test-page li { overflow-wrap: anywhere; }
+  #run-tests { justify-self: start; }
+  #test-results { padding-left: 24px; margin: 0; }
+  #test-results li { padding: 12px; margin-bottom: 8px; background: white; border: 1px solid var(--border); border-radius: 6px; }
+  .test-pass { color: var(--green-700); }
+  .test-fail { color: var(--red-700); }
+}

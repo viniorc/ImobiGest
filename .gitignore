@@ -1,0 +1,9 @@
+# Publicar somente a aplicação, seus testes e instruções de uso.
+/*
+!/.gitignore
+!/.nojekyll
+!/README.md
+!/index.html
+!/css/
+!/js/
+!/tests/

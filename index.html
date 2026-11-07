@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#142b40">
+    <meta name="description" content="ImobiGest — organização local do seu patrimônio imobiliário.">
+    <title>ImobiGest</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23142b40'/%3E%3Cpath d='M8 25V12l8-5 8 5v13M13 25v-8h6v8' fill='none' stroke='%2394dec6' stroke-width='2'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="./css/style.css">
+    <link rel="stylesheet" href="./css/responsive.css">
+    <script type="module" src="./js/app.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Pular para o conteúdo</a>
+    <div class="app-shell" id="app-shell">
+      <aside class="sidebar" id="sidebar" aria-label="Menu principal">
+        <a class="brand" href="#/dashboard" aria-label="ImobiGest — Dashboard">
+          <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><path d="M6 26V11L16 5l10 6v15M12 26V16h8v10M3 26h26"/></svg></span>
+          <span class="brand-copy">Imobi<span>Gest</span><small>GESTÃO DE IMÓVEIS</small></span>
+        </a>
+        <button class="icon-button mobile-close" id="close-menu" type="button" aria-label="Fechar menu">×</button>
+        <p class="nav-caption">ESPAÇO DE TRABALHO</p>
+        <nav aria-label="Seções do sistema" id="main-navigation"></nav>
+        <div class="sidebar-bottom">
+          <div class="local-note"><span class="local-dot" aria-hidden="true"></span><div><strong>Seu espaço local</strong><p>Neste navegador e dispositivo</p></div></div>
+          <button class="sidebar-toggle" id="collapse-menu" type="button" aria-controls="sidebar" aria-expanded="true"><span aria-hidden="true">«</span><span class="toggle-label">Recolher menu</span></button>
+        </div>
+      </aside>
+      <button class="menu-backdrop" id="menu-backdrop" type="button" aria-label="Fechar menu" hidden tabindex="-1"></button>
+      <div class="workspace" id="workspace">
+        <header class="topbar">
+          <div class="topbar-location"><button class="icon-button mobile-menu" id="open-menu" type="button" aria-label="Abrir menu" aria-controls="sidebar" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button><span class="workspace-label">Meu espaço</span><span class="breadcrumb-separator" aria-hidden="true">/</span><span id="breadcrumb">Dashboard</span></div>
+          <span class="local-badge"><span class="local-dot" aria-hidden="true"></span>Aplicação local</span>
+        </header>
+        <main id="main-content" tabindex="-1"></main>
+        <footer class="app-footer"><span>ImobiGest <span aria-hidden="true">·</span> Gestão com clareza.</span><span>Versão inicial <span aria-hidden="true">/</span> Etapa 11</span></footer>
+      </div>
+    </div>
+    <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="false"></div>
+    <noscript><div class="noscript-message">Ative o JavaScript para navegar no ImobiGest. Abra o projeto por um servidor HTTP local, como o Live Server.</div></noscript>
+  </body>
+</html>

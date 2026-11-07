@@ -1,0 +1,76 @@
+import { createDatabase, STORE_NAMES, DB_VERSION } from '../js/db.js';
+import { createId } from '../js/utils.js';
+import { exportBackup, prepareBackup, restoreBackup, readBackupSnapshot, snapshotStamp, validateBackupData, BACKUP_MAX_BYTES } from '../js/backup.js';
+import { buildDemoData, ensureDemo, clearDemo } from '../js/demo.js';
+import { createPhotoService } from '../js/galeria-service.js';
+import { buildDashboard } from '../js/dashboard-calculos.js';
+
+const assert=(value,message='Resultado inesperado')=>{if(!value)throw new Error(message);};
+const equal=(a,b)=>assert(JSON.stringify(a)===JSON.stringify(b),`Esperado ${JSON.stringify(b)}; obtido ${JSON.stringify(a)}`);
+async function rejects(work,code){let error;try{await work();}catch(e){error=e;}assert(error,'Deveria rejeitar');if(code)equal(error.code,code);return error;}
+export async function runStage10Tests(onResult=()=>{}) {
+  const results=[],clients=[],names=[];let source,baseline,envelope,prepared,demoData;
+  function db(){const name=`imobigest-test-backup-${createId()}`;names.push(name);const d=createDatabase({name});clients.push(d);return d;}
+  function reopen(d){const fresh=createDatabase({name:d.name});clients.push(fresh);return fresh;}
+  async function test(name,work){let result;try{await work();result={name,passed:true};}catch(e){result={name,passed:false,error:e.message};}results.push(result);onResult(result);}
+  const changed=mutate=>{const e=structuredClone(envelope);mutate(e);return JSON.stringify(e);};
+  const stamp=async d=>snapshotStamp(await readBackupSnapshot(d));
+  try{
+    await test('Demo construída explicitamente: cinco imóveis, três contratos, quatro reservas e cinco Blobs',async()=>{
+      demoData=await buildDemoData('2026-11-07');await validateBackupData(demoData,'demo');equal(demoData.properties.length,5);equal(demoData.leases.length,3);equal(demoData.bookings.length,4);equal(demoData.photos.length,5);assert(demoData.photos.every(p=>p.blob instanceof Blob&&p.thumbnailBlob instanceof Blob));
+      source=db();const data=structuredClone(demoData);data.appMeta[0].datasetKind='test';data.appMeta[0].demoMode=false;
+      await source.runTransaction([...STORE_NAMES],'readwrite',tx=>{for(const store of STORE_NAMES){tx.request(tx.store(store).clear(),()=>{});for(const row of data[store])tx.request(tx.store(store).add(row),()=>{});}});
+    });
+    await test('Exportação inclui todas as coleções, versões, contagens e conteúdo dos dois Blobs',async()=>{baseline=await exportBackup(source);envelope=JSON.parse(await baseline.blob.text());equal(envelope.schemaVersion,DB_VERSION);equal(Object.keys(envelope.data).sort(),[...STORE_NAMES].sort());equal(envelope.counts.photos,5);assert(envelope.data.photos.every(p=>p.blob.encoding==='base64'&&p.thumbnailBlob.data.length>0));assert(baseline.blob.size<BACKUP_MAX_BYTES);});
+    await test('Exportar não altera a fonte ou converte seus Blobs persistidos',async()=>{equal(await stamp(source),baseline.stamp);assert((await source.get('photos','demo-photo-1')).blob instanceof Blob);});
+    await test('Prévia valida arquivo sem escrever na fonte',async()=>{prepared=await prepareBackup(await baseline.blob.text());equal(prepared.counts.properties,5);equal(await stamp(source),baseline.stamp);});
+    await test('Restaura em banco limpo: compara todos os IDs, campos, vínculos e bytes de originais/miniaturas',async()=>{
+      const target=db();await restoreBackup(prepared,target,{confirmed:true,expectedStamp:await stamp(target)});const restored=await readBackupSnapshot(reopen(target));const original=await readBackupSnapshot(source);
+      for(const store of STORE_NAMES.filter(s=>s!=='appMeta'&&s!=='photos'))equal(restored[store],original[store]);
+      for(let i=0;i<restored.photos.length;i++){const a=restored.photos[i],b=original.photos[i];equal({...a,blob:null,thumbnailBlob:null},{...b,blob:null,thumbnailBlob:null});for(const key of ['blob','thumbnailBlob'])equal([...new Uint8Array(await a[key].arrayBuffer())],[...new Uint8Array(await b[key].arrayBuffer())]);}
+      equal(restored.appMeta[0].schemaVersion,original.appMeta[0].schemaVersion);assert(restored.appMeta[0].restoreEpoch);equal(restored.properties[0].coverPhotoId,original.properties[0].coverPhotoId);
+      const photo=await createPhotoService(reopen(target)).get('demo-photo-1','demo-property-1');assert(photo.blob instanceof Blob);
+    });
+    await test('Imagens restauradas são decodificáveis pelo navegador',async()=>{const target=db();await restoreBackup(prepared,target,{confirmed:true,expectedStamp:await stamp(target)});const p=await target.get('photos','demo-photo-1');const url=URL.createObjectURL(p.blob);try{const image=new Image();image.src=url;await image.decode();equal(image.naturalWidth,p.width);}finally{URL.revokeObjectURL(url);}});
+    await test('Foto PNG acima de 1 MiB percorre JSON, restauração e comparação de bytes',async()=>{
+      const canvas=document.createElement('canvas');canvas.width=800;canvas.height=600;const ctx=canvas.getContext('2d');const pixels=ctx.createImageData(800,600);
+      for(let i=0;i<pixels.data.length;i+=65536)crypto.getRandomValues(pixels.data.subarray(i,Math.min(i+65536,pixels.data.length)));
+      ctx.putImageData(pixels,0,0);const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));assert(blob.size>1024*1024);canvas.width=canvas.height=0;
+      const src=db();const d=structuredClone(demoData);d.appMeta[0].datasetKind='test';d.appMeta[0].demoMode=false;
+      Object.assign(d.photos[0],{blob,mimeType:'image/png',tamanho:blob.size,width:800,height:600,originalSize:blob.size});
+      await src.runTransaction([...STORE_NAMES],'readwrite',tx=>{for(const s of STORE_NAMES){tx.request(tx.store(s).clear(),()=>{});for(const r of d[s])tx.request(tx.store(s).add(r),()=>{});}});
+      const exported=await exportBackup(src);const candidate=await prepareBackup(await exported.blob.text());const target=db();await restoreBackup(candidate,target,{confirmed:true,expectedStamp:await stamp(target)});
+      const actual=new Uint8Array(await (await target.get('photos','demo-photo-1')).blob.arrayBuffer()),expected=new Uint8Array(await blob.arrayBuffer());equal(actual.length,expected.length);assert(actual.every((value,i)=>value===expected[i]));
+    });
+    await test('Sem confirmação ou token de prévia, substituição é recusada',async()=>{const target=db();const before=await stamp(target);await rejects(()=>restoreBackup(prepared,target,{expectedStamp:before}));await rejects(()=>restoreBackup({...prepared},target,{confirmed:true,expectedStamp:before}));equal(await stamp(target),before);});
+    await test('JSON inválido e documento de outro aplicativo são recusados',async()=>{await rejects(()=>prepareBackup('{inválido'));await rejects(()=>prepareBackup(changed(e=>e.application='Outro')));});
+    await test('Versão futura do formato ou schema é rejeitada',async()=>{await rejects(()=>prepareBackup(changed(e=>e.backupFormatVersion=999)));await rejects(()=>prepareBackup(changed(e=>e.schemaVersion=999)));});
+    await test('Coleção ausente, contagem divergente e ID duplicado são rejeitados',async()=>{for(const mutation of [e=>delete e.data.leases,e=>e.counts.photos++,e=>{e.data.properties.push(e.data.properties[0]);e.counts.properties++;}])await rejects(()=>prepareBackup(changed(mutation)));});
+    await test('IDs inválidos, campos desconhecidos e tipo textual incorreto são rejeitados',async()=>{for(const mutation of [e=>e.data.properties[0].id='../ruim',e=>e.data.properties[0].extra=1,e=>e.data.properties[0].nome=42])await rejects(()=>prepareBackup(changed(mutation)));});
+    await test('Campos obrigatórios, centavos fracionários e moeda negativa são rejeitados',async()=>{for(const mutation of [e=>e.data.properties[0].nome='',e=>e.data.transactions[0].valorCentavos=1.5,e=>e.data.bookings[0].valorBrutoCentavos=-1])await rejects(()=>prepareBackup(changed(mutation)));});
+    await test('Liquidação ausente ou data civil inválida impede restauração',async()=>{await rejects(()=>prepareBackup(changed(e=>e.data.transactions[0].liquidadoEm=null)));await rejects(()=>prepareBackup(changed(e=>e.data.transactions[0].vencimento='2026-02-30')));});
+    await test('Imóvel órfão, origem de outro imóvel e chave de origem duplicada são rejeitados',async()=>{for(const mutation of [e=>e.data.bookings[0].propriedadeId='ausente',e=>e.data.transactions[0].propriedadeId='demo-property-5',e=>{const r={...e.data.transactions[0],id:'extra'};e.data.transactions.push(r);e.counts.transactions++;}])await rejects(()=>prepareBackup(changed(mutation)));});
+    await test('Capa ausente ou de outro imóvel é recusada',async()=>{await rejects(()=>prepareBackup(changed(e=>e.data.properties[0].coverPhotoId='ausente')));await rejects(()=>prepareBackup(changed(e=>e.data.properties[0].coverPhotoId='demo-photo-2')));});
+    await test('Reserva cancelada com lançamento ativo é rejeitada',async()=>{await rejects(()=>prepareBackup(changed(e=>e.data.bookings[0].situacao='cancelada')));});
+    await test('Sobreposição de reservas/contratos é recusada antes da escrita',async()=>{await rejects(()=>prepareBackup(changed(e=>{const b={...e.data.bookings[0],id:'overlap'};e.data.bookings.push(b);e.counts.bookings++;})));await rejects(()=>prepareBackup(changed(e=>{const l={...e.data.leases[0],id:'overlap'};e.data.leases.push(l);e.counts.leases++;})));});
+    await test('Base64 inválido, tamanho divergente, MIME falso e imagem corrompida são recusados',async()=>{for(const mutation of [e=>e.data.photos[0].blob.data='!!!!',e=>e.data.photos[0].blob.size++,e=>e.data.photos[0].mimeType='image/png',e=>{const p=e.data.photos[0];p.blob.data=btoa('x'.repeat(p.blob.size));}])await rejects(()=>prepareBackup(changed(mutation)));});
+    await test('Conteúdo malicioso em chaves de JSON é rejeitado',async()=>{await rejects(()=>prepareBackup('{"__proto__":{"polluted":true}}'));assert(!({}).polluted);});
+    await test('Falha de validação conserva a base existente integralmente',async()=>{const before=await stamp(source);await rejects(()=>prepareBackup(changed(e=>delete e.data.properties)));equal(await stamp(source),before);});
+    await test('Substituição remove registros antigos somente após confirmação e commit',async()=>{const target=db();await target.add('properties',{...demoData.properties[0],id:'anterior',coverPhotoId:null});await restoreBackup(prepared,target,{confirmed:true,expectedStamp:await stamp(target)});equal(await target.get('properties','anterior'),undefined);equal((await target.list('properties')).length,5);});
+    await test('Escrita concorrente após prévia bloqueia substituição',async()=>{const target=db();const before=await stamp(target);await target.add('appMeta',{id:'nova-alteracao',valor:1});const changedStamp=await stamp(target);await rejects(()=>restoreBackup(prepared,target,{confirmed:true,expectedStamp:before}),'CONFLICT');equal(await stamp(target),changedStamp);});
+    await test('Quota simulada depois de clears/adds aborta tudo, preservando base anterior',async()=>{
+      const target=db();await target.add('appMeta',{id:'preservar',valor:1});const before=await stamp(target);
+      const wrapped={name:target.name,runTransaction(stores,mode,work){return target.runTransaction(stores,mode,tx=>work({...tx,store(name){const store=tx.store(name);return new Proxy(store,{get(object,key){if(key==='add')return row=>{const request=object.add(row);request.addEventListener('success',()=>tx.abort(new DOMException('Quota simulada','QuotaExceededError')),{once:true});return request;};const value=object[key];return typeof value==='function'?value.bind(object):value;}});}}));}};
+      await rejects(()=>restoreBackup(prepared,wrapped,{confirmed:true,expectedStamp:before}),'QUOTA');equal(await stamp(target),before);
+    });
+    await test('Outra conexão com formulário antigo não escreve após restauração',async()=>{const target=db();const stale=reopen(target);await stale.list('properties');await restoreBackup(prepared,target,{confirmed:true,expectedStamp:await stamp(target)});await rejects(()=>stale.add('appMeta',{id:'antigo'}),'STALE_DATASET');await reopen(target).add('appMeta',{id:'novo'});equal((await target.get('appMeta','novo')).id,'novo');});
+    await test('Backup demo não é aceito como real, nem backup real como demo',async()=>{const e=structuredClone(envelope);e.datasetKind='demo';e.data.appMeta[0].datasetKind='demo';e.data.appMeta[0].demoMode=true;const p=await prepareBackup(JSON.stringify(e));await rejects(()=>restoreBackup(p,{name:'imobigest'},{confirmed:true,expectedStamp:''}));await rejects(()=>restoreBackup(prepared,{name:'imobigest-demo'},{confirmed:true,expectedStamp:''}));});
+    await test('Ativar demo duas vezes reutiliza sem duplicar e preserva alterações',async()=>{const target=db();equal((await ensureDemo(target,'2026-11-07')).created,true);const d=reopen(target);await d.update('properties','demo-property-1',{nome:'Demo editada'});const before=await stamp(d);equal((await ensureDemo(reopen(target),'2026-11-07')).created,false);equal(await stamp(d),before);equal((await d.list('properties')).length,5);});
+    await test('Ativações simultâneas só criam uma demo',async()=>{const target=db();const result=await Promise.all([ensureDemo(target,'2026-11-07'),ensureDemo(reopen(target),'2026-11-07')]);equal(result.filter(r=>r.created).length,1);equal((await reopen(target).list('properties')).length,5);});
+    await test('Limpar demo exige confirmação e preserva integralmente outro banco',async()=>{const target=db();await ensureDemo(target,'2026-11-07');const before=await stamp(source);await rejects(()=>clearDemo({db:reopen(target)}));equal((await reopen(target).list('properties')).length,5);await clearDemo({db:reopen(target),confirmed:true});equal((await reopen(target).list('properties')).length,0);equal(await stamp(source),before);});
+    await test('Seletor de demo e limpeza recusam explicitamente a base real',async()=>{await rejects(()=>ensureDemo({name:'imobigest'}));await rejects(()=>clearDemo({db:{name:'imobigest'},confirmed:true}));});
+    await test('Recriar demo após limpeza preserva bloqueio contra aba antiga',async()=>{const target=db();await ensureDemo(target,'2026-11-07');const old=reopen(target);await old.list('properties');await clearDemo({db:reopen(target),confirmed:true});await ensureDemo(reopen(target),'2026-11-07');await rejects(()=>old.update('properties','demo-property-1',{nome:'antigo'}),'STALE_DATASET');});
+    await test('Demo tem lançamentos únicos e Dashboard usa somente caixa liquidado',()=>{const keys=demoData.transactions.filter(t=>t.chaveOrigem).map(t=>t.chaveOrigem);equal(new Set(keys).size,keys.length);const m=buildDashboard(demoData,{preset:'personalizado',inicio:'2026-11-01',fim:'2026-11-30'},'2026-11-07');equal(m.totals.receitaRealizada,750000);equal(m.totals.despesaRealizada,128000);equal(m.totals.resultadoRealizado,622000);assert(m.totals.aReceber>0);});
+  } finally {clients.forEach(d=>d.close());await test('Remove somente os bancos de teste desta suíte',async()=>{for(const name of names)await new Promise((resolve,reject)=>{const r=indexedDB.deleteDatabase(name);r.onsuccess=resolve;r.onerror=()=>reject(r.error);r.onblocked=()=>reject(new Error('Banco isolado bloqueado'));});});}
+  return results;
+}

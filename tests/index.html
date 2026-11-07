@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Verificações da etapa 02 | ImobiGest</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="./tests.css">
+  <script type="module" src="./runner.js"></script>
+</head>
+<body>
+  <main class="test-page">
+    <a class="text-link" href="../index.html#/configuracoes">Voltar às Configurações</a>
+    <h1>Verificações da etapa 02</h1>
+    <p><a class="text-link" href="./todas.html">Executar regressão completa · etapas 02–11</a></p>
+    <p>Centavos, datas civis, IDs e persistência. Cada execução cria bancos descartáveis com prefixo <code>imobigest-test-suite-</code>. A base principal e o registro manual do diagnóstico são preservados.</p>
+    <p>O teste de fechar e reabrir o navegador é separado: use o registro salvo no diagnóstico das Configurações, mantendo o mesmo endereço e perfil.</p>
+    <a class="text-link" href="./imoveis.html">Verificações de imóveis — etapa 03</a>
+    <a class="text-link" href="./financeiro.html">Verificações financeiras — etapa 04</a>
+    <a class="text-link" href="./alugueis.html">Verificações de contratos — etapa 05</a>
+    <a class="text-link" href="./reservas.html">Reservas</a>
+    <a class="text-link" href="./galeria.html">Galeria</a>
+    <a class="text-link" href="./dashboard.html">Dashboard</a>
+    <button id="run-tests" class="button button-primary" type="button">Executar verificações</button>
+    <p id="test-summary" role="status">Aguardando execução.</p>
+    <ol id="test-results" aria-label="Resultados das verificações"></ol>
+    <noscript>Ative o JavaScript e abra esta página pelo Live Server.</noscript>
+  </main>
+</body>
+</html>
